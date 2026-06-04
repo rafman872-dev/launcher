@@ -44,10 +44,31 @@
 
         .error-box { max-width: 500px; margin: 20px auto; padding: 15px; background: rgba(255,68,68,0.1); border: 1px solid #ff4444; border-radius: 8px; color: #ff6666; font-size: 14px; display: none; }
         .stats { text-align: center; color: #444; font-size: 12px; margin-bottom: 20px; }
+        
+        #gamepadDebug {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background: rgba(0,0,0,0.8);
+            border: 1px solid #00ff88;
+            color: #00ff88;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-family: monospace;
+            max-width: 300px;
+            z-index: 9999;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        #gamepadDebug.connected { border-color: #00ff88; background: rgba(0, 136, 68, 0.15); }
+        #gamepadDebug.disconnected { border-color: #888; color: #888; background: rgba(0,0,0,0.5); }
 
         @media (max-width: 768px) {
             h1 { font-size: 24px; }
             .grid { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); }
+            #gamepadDebug { font-size: 9px; padding: 8px; bottom: 5px; right: 5px; }
         }
     </style>
 </head>
@@ -76,6 +97,11 @@
         </div>
     </div>
 
+    <!-- Отладка геймпада -->
+    <div id="gamepadDebug" class="disconnected">
+        Джойстик: не подключен
+    </div>
+
     <script>
         const DATABASE_URL = 'games.json';
         
@@ -83,21 +109,34 @@
         let filteredGames = [];
         let currentIndex = 0;
         let currentFilter = 'all';
+        let selectedCardIndex = 0;
+        let gamepadConnected = false;
+        let gamepadLastTime = 0;
         const CHUNK_SIZE = 60;
+        const GAMEPAD_POLL_INTERVAL = 50; // мс
+        const STICK_DEADZONE = 0.3;
 
-        // Загрузить игры
-        fetch(DATABASE_URL)
-            .then(r => r.json())
-            .then(data => {
-                allGames = (data.downloads || data).filter(g => g && g.title);
-                document.getElementById('stats').innerText = `Всего игр: ${allGames.length}`;
-                filteredGames = [...allGames];
-                applyFilterAndSearch();
-            })
-            .catch(err => {
-                document.getElementById('errorLog').style.display = 'block';
-                document.getElementById('errorLog').innerText = `Ошибка: ${err.message}`;
-            });
+        // ===== ИНИЦИАЛИЗАЦИЯ =====
+        window.addEventListener('load', () => {
+            loadGames();
+            setupGamepadListener();
+        });
+
+        // ===== ЗАГРУЗКА ИГР =====
+        function loadGames() {
+            fetch(DATABASE_URL)
+                .then(r => r.json())
+                .then(data => {
+                    allGames = (data.downloads || data).filter(g => g && g.title);
+                    document.getElementById('stats').innerText = `Всего игр: ${allGames.length}`;
+                    filteredGames = [...allGames];
+                    applyFilterAndSearch();
+                })
+                .catch(err => {
+                    document.getElementById('errorLog').style.display = 'block';
+                    document.getElementById('errorLog').innerText = `Ошибка: ${err.message}`;
+                });
+        }
 
         function applyFilterAndSearch() {
             const search = document.getElementById('searchInput').value.toLowerCase().trim();
@@ -112,6 +151,7 @@
             });
 
             currentIndex = 0;
+            selectedCardIndex = 0;
             renderNextChunk(true);
         }
 
@@ -121,11 +161,12 @@
 
             const chunk = filteredGames.slice(currentIndex, currentIndex + CHUNK_SIZE);
             
-            chunk.forEach(game => {
+            chunk.forEach((game, idx) => {
                 if (!game.uris || !game.uris.length) return;
                 
                 const card = document.createElement('div');
                 card.className = 'card';
+                card.setAttribute('data-index', currentIndex + idx);
                 card.innerHTML = `
                     <div>
                         <h3>${game.title}</h3>
@@ -141,6 +182,8 @@
             currentIndex += CHUNK_SIZE;
             document.getElementById('loadMoreBtn').style.display = 
                 currentIndex < filteredGames.length ? 'inline-block' : 'none';
+            
+            updateCardHighlight();
         }
 
         function handleSearch() {
@@ -152,6 +195,130 @@
             btn.classList.add('active');
             currentFilter = filter;
             applyFilterAndSearch();
+        }
+
+        // ===== ГЕЙМПАД =====
+        function setupGamepadListener() {
+            window.addEventListener('gamepadconnected', (e) => {
+                console.log('🎮 Джойстик подключен:', e.gamepad.id);
+                gamepadConnected = true;
+                updateGamepadDisplay();
+                pollGamepad();
+            });
+
+            window.addEventListener('gamepaddisconnected', (e) => {
+                console.log('❌ Джойстик отключен');
+                gamepadConnected = false;
+                updateGamepadDisplay();
+            });
+
+            // Первоначальная проверка
+            if (navigator.getGamepads().length > 0 && navigator.getGamepads()[0]) {
+                gamepadConnected = true;
+                updateGamepadDisplay();
+                pollGamepad();
+            }
+        }
+
+        function updateGamepadDisplay() {
+            const debug = document.getElementById('gamepadDebug');
+            if (gamepadConnected) {
+                debug.classList.remove('disconnected');
+                debug.classList.add('connected');
+                const gp = navigator.getGamepads()[0];
+                if (gp) {
+                    debug.textContent = `✓ ${gp.id}\nЭкземпляр ${gp.index}`;
+                }
+            } else {
+                debug.classList.remove('connected');
+                debug.classList.add('disconnected');
+                debug.textContent = `Джойстик: не подключен\n(Подключите и перезагрузите)`;
+            }
+        }
+
+        function pollGamepad() {
+            const now = performance.now();
+            if (now - gamepadLastTime < GAMEPAD_POLL_INTERVAL) {
+                requestAnimationFrame(pollGamepad);
+                return;
+            }
+            gamepadLastTime = now;
+
+            const gamepads = navigator.getGamepads();
+            let anyConnected = false;
+
+            for (let i = 0; i < gamepads.length; i++) {
+                const gp = gamepads[i];
+                if (!gp) continue;
+                anyConnected = true;
+
+                // D-Pad (кнопки 12-15)
+                if (gp.buttons[12].pressed) moveSelection(-4); // ↑
+                if (gp.buttons[13].pressed) moveSelection(4);   // ↓
+                if (gp.buttons[14].pressed) changeFilter(-1);   // ← LB
+                if (gp.buttons[15].pressed) changeFilter(1);    // → RB
+
+                // Left Stick (оси 0, 1)
+                if (Math.abs(gp.axes[1]) > STICK_DEADZONE) {
+                    if (gp.axes[1] < -STICK_DEADZONE) moveSelection(-4);
+                    if (gp.axes[1] > STICK_DEADZONE) moveSelection(4);
+                }
+                if (Math.abs(gp.axes[0]) > STICK_DEADZONE) {
+                    if (gp.axes[0] < -STICK_DEADZONE) changeFilter(-1);
+                    if (gp.axes[0] > STICK_DEADZONE) changeFilter(1);
+                }
+
+                // Кнопки действий
+                if (gp.buttons[0].pressed) clickSelectedCard();    // A
+                if (gp.buttons[3].pressed) clickSelectedCard();    // Y
+                if (gp.buttons[6].pressed) scrollUp();             // LT
+                if (gp.buttons[7].pressed) scrollDown();           // RT
+                
+                updateGamepadDisplay();
+            }
+
+            if (gamepadConnected || anyConnected) {
+                requestAnimationFrame(pollGamepad);
+            }
+        }
+
+        function moveSelection(offset) {
+            selectedCardIndex = Math.max(0, Math.min(selectedCardIndex + offset, filteredGames.length - 1));
+            updateCardHighlight();
+        }
+
+        function updateCardHighlight() {
+            const cards = document.querySelectorAll('.card');
+            cards.forEach(card => card.style.boxShadow = 'none');
+            
+            if (cards[selectedCardIndex]) {
+                cards[selectedCardIndex].style.boxShadow = '0 0 30px rgba(0,255,136,0.8)';
+                cards[selectedCardIndex].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        }
+
+        function clickSelectedCard() {
+            const cards = document.querySelectorAll('.card');
+            if (cards[selectedCardIndex]) {
+                const btn = cards[selectedCardIndex].querySelector('.btn');
+                if (btn) btn.click();
+            }
+        }
+
+        function changeFilter(offset) {
+            const filters = ['all', 'heavy', 'light'];
+            const idx = filters.indexOf(currentFilter);
+            const newIdx = (idx + offset + filters.length) % filters.length;
+            const btn = document.querySelectorAll('.filter-btn')[newIdx];
+            filterGames(filters[newIdx], btn);
+        }
+
+        function scrollUp() {
+            document.querySelector('.grid').scrollBy({ top: -300, behavior: 'smooth' });
+        }
+
+        function scrollDown() {
+            document.querySelector('.grid').scrollBy({ top: 300, behavior: 'smooth' });
         }
     </script>
 </body>

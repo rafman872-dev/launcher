@@ -16,3 +16,5 @@ build/
 *~
 .directory
 Thumbs.db
+open /workspaces/launcher/index.html
+open /workspaces/launcher/README.md 
