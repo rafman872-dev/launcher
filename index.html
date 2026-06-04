@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>⚡ HYDRA DIRECT LAUNCHER ⚡</title>
+    <style>
+        body { background: #08080a; color: #fff; font-family: 'Segoe UI', sans-serif; padding: 40px; margin: 0; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        h1 { text-align: center; color: #00ff88; font-size: 32px; letter-spacing: 1px; margin-bottom: 5px; text-shadow: 0 0 20px rgba(0,255,136,0.3); }
+        p.subtitle { text-align: center; color: #666; margin-top: 0; margin-bottom: 40px; font-size: 14px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
+        .card { background: #111116; border: 1px solid #1f1f26; border-radius: 12px; overflow: hidden; transition: 0.25s; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; height: 150px; }
+        .card:hover { transform: translateY(-3px); border-color: #00ff88; box-shadow: 0 8px 25px rgba(0, 255, 136, 0.15); }
+        .card h3 { font-size: 16px; margin: 0 0 10px 0; color: #eee; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .size-tag { background: rgba(0, 255, 136, 0.08); color: #00ff88; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; align-self: flex-start; border: 1px solid rgba(0,255,136,0.15); }
+        .bottom-row { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
+        .btn { background: #00ff88; color: #000; border: none; padding: 10px 20px; font-weight: bold; border-radius: 6px; cursor: pointer; text-decoration: none; transition: 0.2s; font-size: 13px; letter-spacing: 0.5px; }
+        .btn:hover { background: #fff; transform: scale(1.03); }
+        .loading { text-align: center; color: #888; font-size: 18px; margin-top: 100px; font-weight: 300; }
+        .spinner { border: 3px solid #111; border-top: 3px solid #00ff88; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; }
+        .error-box { max-width: 500px; margin: 20px auto; padding: 15px; background: rgba(255,68,68,0.1); border: 1px solid #ff4444; border-radius: 8px; color: #ff6666; font-size: 14px; font-family: monospace; display: none; text-align: left; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>⚡ МОЙ МГНОВЕННЫЙ ЛАУНЧЕР ⚡</h1>
+        <p class="subtitle">Прямое подключение без прокси (Требуется CORS-расширение)</p>
+        
+        <div id="loader">
+            <div class="spinner"></div>
+            <div id="loading" class="loading">Скачиваем базу напрямую...</div>
+        </div>
+
+        <div id="errorLog" class="error-box"></div>
+        
+        <div class="grid" id="catalog"></div>
+    </div>
+
+    <script>
+        // БЬЕМ НАПРЯМУЮ! Без всяких allorigins и corsproxy.
+        const REAL_HYDRA_URL = 'https://hydralinks.cloud/sources/xatab.json';
+
+        const catalogEl = document.getElementById('catalog');
+        const loaderEl = document.getElementById('loader');
+        const loadingEl = document.getElementById('loading');
+        const errorLogEl = document.getElementById('errorLog');
+
+        // Обычный прямой запрос
+        fetch(REAL_HYDRA_URL)
+            .then(response => {
+                if (!response.ok) throw new Error(`Сервер отклонил запрос: ${response.status}. Проверь, включено ли расширение CORS.`);
+                return response.json();
+            })
+            .then(hydraSource => {
+                loaderEl.style.display = 'none';
+
+                if (!hydraSource.downloads || !Array.isArray(hydraSource.downloads)) {
+                    throw new Error('Данные получены, но формат не совпадает.');
+                }
+
+                // Ограничим вывод до 100 карточек, чтобы слабые мини-ПК не зависли от тысяч игр
+                const gamesToShow = hydraSource.downloads.slice(0, 100);
+
+                gamesToShow.forEach(game => {
+                    if (!game.uris || game.uris.length === 0) return;
+
+                    const card = document.createElement('div');
+                    card.className = 'card';
+                    const magnetLink = game.uris[0]; 
+
+                    card.innerHTML = `
+                        <div>
+                            <h3 title="${game.title}">${game.title}</h3>
+                            <span class="size-tag">${game.fileSize || '?? GB'}</span>
+                        </div>
+                        <div class="bottom-row">
+                            <a href="${magnetLink}" class="btn">СКАЧАТЬ ИГРУ</a>
+                        </div>
+                    `;
+                    catalogEl.appendChild(card);
+                });
+            })
+            .catch(error => {
+                document.querySelector('.spinner').style.display = 'none';
+                loadingEl.innerText = '❌ Ошибка синхронизации';
+                loadingEl.style.color = '#ff4444';
+                
+                errorLogEl.style.display = 'block';
+                errorLogEl.innerText = `Детали: ${error.message}`;
+                console.error('Ошибка лаунчера:', error);
+            });
+    </script>
+</body>
+</html>
