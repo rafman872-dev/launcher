@@ -2,95 +2,105 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <title>⚡ HYDRA DIRECT LAUNCHER ⚡</title>
+    <title>⚡ GITHUB LAUNCHER ⚡</title>
     <style>
         body { background: #08080a; color: #fff; font-family: 'Segoe UI', sans-serif; padding: 40px; margin: 0; }
         .container { max-width: 1200px; margin: 0 auto; }
         h1 { text-align: center; color: #00ff88; font-size: 32px; letter-spacing: 1px; margin-bottom: 5px; text-shadow: 0 0 20px rgba(0,255,136,0.3); }
-        p.subtitle { text-align: center; color: #666; margin-top: 0; margin-bottom: 40px; font-size: 14px; }
+        p.subtitle { text-align: center; color: #666; margin-top: 0; margin-bottom: 30px; font-size: 14px; }
+        
+        .filter-bar { display: flex; justify-content: center; gap: 10px; margin-bottom: 30px; flex-wrap: wrap; }
+        .filter-btn { background: #111116; color: #888; border: 1px solid #222; padding: 8px 16px; border-radius: 20px; cursor: pointer; font-weight: 600; transition: 0.2s; }
+        .filter-btn.active, .filter-btn:hover { background: #00ff88; color: #000; border-color: #00ff88; }
+
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-        .card { background: #111116; border: 1px solid #1f1f26; border-radius: 12px; overflow: hidden; transition: 0.25s; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; height: 150px; }
+        .card { background: #111116; border: 1px solid #1f1f26; border-radius: 12px; overflow: hidden; transition: 0.25s; padding: 20px; display: flex; flex-direction: column; justify-content: space-between; height: 160px; }
         .card:hover { transform: translateY(-3px); border-color: #00ff88; box-shadow: 0 8px 25px rgba(0, 255, 136, 0.15); }
         .card h3 { font-size: 16px; margin: 0 0 10px 0; color: #eee; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .size-tag { background: rgba(0, 255, 136, 0.08); color: #00ff88; padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; align-self: flex-start; border: 1px solid rgba(0,255,136,0.15); }
+        .tags { display: flex; gap: 5px; }
+        .tag { background: rgba(0, 255, 136, 0.08); color: #00ff88; padding: 4px 10px; border-radius: 6px; font-size: 11px; border: 1px solid rgba(0,255,136,0.15); font-weight: 600; }
         .bottom-row { display: flex; justify-content: space-between; align-items: center; margin-top: auto; }
-        .btn { background: #00ff88; color: #000; border: none; padding: 10px 20px; font-weight: bold; border-radius: 6px; cursor: pointer; text-decoration: none; transition: 0.2s; font-size: 13px; letter-spacing: 0.5px; }
+        .btn { background: #00ff88; color: #000; border: none; padding: 10px 20px; font-weight: bold; border-radius: 6px; cursor: pointer; text-decoration: none; transition: 0.2s; font-size: 13px; }
         .btn:hover { background: #fff; transform: scale(1.03); }
-        .loading { text-align: center; color: #888; font-size: 18px; margin-top: 100px; font-weight: 300; }
-        .spinner { border: 3px solid #111; border-top: 3px solid #00ff88; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; }
-        .error-box { max-width: 500px; margin: 20px auto; padding: 15px; background: rgba(255,68,68,0.1); border: 1px solid #ff4444; border-radius: 8px; color: #ff6666; font-size: 14px; font-family: monospace; display: none; text-align: left; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .error-box { max-width: 500px; margin: 20px auto; padding: 15px; background: rgba(255,68,68,0.1); border: 1px solid #ff4444; border-radius: 8px; color: #ff6666; font-size: 14px; display: none; }
     </style>
 </head>
 <body>
 
     <div class="container">
         <h1>⚡ МОЙ МГНОВЕННЫЙ ЛАУНЧЕР ⚡</h1>
-        <p class="subtitle">Прямое подключение без прокси (Требуется CORS-расширение)</p>
+        <p class="subtitle">Работает напрямую через GitHub Pages</p>
         
-        <div id="loader">
-            <div class="spinner"></div>
-            <div id="loading" class="loading">Скачиваем базу напрямую...</div>
+        <div class="filter-bar" id="filterBar">
+            <button class="filter-btn active" onclick="filterGames('all', this)">Все игры</button>
+            <button class="filter-btn" onclick="filterGames('heavy', this)">Тяжелые (>50 GB)</button>
+            <button class="filter-btn" onclick="filterGames('light', this)">Легкие (<50 GB)</button>
         </div>
 
         <div id="errorLog" class="error-box"></div>
-        
         <div class="grid" id="catalog"></div>
     </div>
 
     <script>
-        // БЬЕМ НАПРЯМУЮ! Без всяких allorigins и corsproxy.
-        const REAL_HYDRA_URL = 'https://hydralinks.cloud/sources/xatab.json';
+        // Файлы лежат в одной папке, поэтому пишем просто имя файла
+        const DATABASE_URL = 'games.json'; 
 
-        const catalogEl = document.getElementById('catalog');
-        const loaderEl = document.getElementById('loader');
-        const loadingEl = document.getElementById('loading');
-        const errorLogEl = document.getElementById('errorLog');
+        let allGames = [];
 
-        // Обычный прямой запрос
-        fetch(REAL_HYDRA_URL)
+        fetch(DATABASE_URL)
             .then(response => {
-                if (!response.ok) throw new Error(`Сервер отклонил запрос: ${response.status}. Проверь, включено ли расширение CORS.`);
+                if (!response.ok) throw new Error('Не удалось загрузить games.json');
                 return response.json();
             })
-            .then(hydraSource => {
-                loaderEl.style.display = 'none';
-
-                if (!hydraSource.downloads || !Array.isArray(hydraSource.downloads)) {
-                    throw new Error('Данные получены, но формат не совпадает.');
-                }
-
-                // Ограничим вывод до 100 карточек, чтобы слабые мини-ПК не зависли от тысяч игр
-                const gamesToShow = hydraSource.downloads.slice(0, 100);
-
-                gamesToShow.forEach(game => {
-                    if (!game.uris || game.uris.length === 0) return;
-
-                    const card = document.createElement('div');
-                    card.className = 'card';
-                    const magnetLink = game.uris[0]; 
-
-                    card.innerHTML = `
-                        <div>
-                            <h3 title="${game.title}">${game.title}</h3>
-                            <span class="size-tag">${game.fileSize || '?? GB'}</span>
-                        </div>
-                        <div class="bottom-row">
-                            <a href="${magnetLink}" class="btn">СКАЧАТЬ ИГРУ</a>
-                        </div>
-                    `;
-                    catalogEl.appendChild(card);
-                });
+            .then(data => {
+                allGames = data.downloads || data;
+                renderCatalog(allGames);
             })
             .catch(error => {
-                document.querySelector('.spinner').style.display = 'none';
-                loadingEl.innerText = '❌ Ошибка синхронизации';
-                loadingEl.style.color = '#ff4444';
-                
-                errorLogEl.style.display = 'block';
-                errorLogEl.innerText = `Детали: ${error.message}`;
-                console.error('Ошибка лаунчера:', error);
+                const errBox = document.getElementById('errorLog');
+                errBox.style.display = 'block';
+                errBox.innerText = `Ошибка: ${error.message}`;
             });
+
+        function renderCatalog(games) {
+            const catalogEl = document.getElementById('catalog');
+            catalogEl.innerHTML = ''; 
+
+            games.forEach(game => {
+                if (!game || !game.uris || game.uris.length === 0) return;
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <div>
+                        <h3 title="${game.title}">${game.title}</h3>
+                        <div class="tags">
+                            <span class="tag">${game.fileSize || '?? GB'}</span>
+                        </div>
+                    </div>
+                    <div class="bottom-row">
+                        <a href="${game.uris[0]}" class="btn">СКАЧАТЬ</a>
+                    </div>
+                `;
+                catalogEl.appendChild(card);
+            });
+        }
+
+        function filterGames(criteria, buttonComponent) {
+            document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+            if(buttonComponent) buttonComponent.classList.add('active');
+
+            if(criteria === 'all') {
+                renderCatalog(allGames);
+            } else {
+                const filtered = allGames.filter(game => {
+                    if (!game || !game.fileSize) return false;
+                    const sizeNum = parseFloat(game.fileSize) || 0;
+                    if (criteria === 'heavy') return sizeNum >= 50;
+                    if (criteria === 'light') return sizeNum < 50;
+                });
+                renderCatalog(filtered);
+            }
+        }
     </script>
 </body>
 </html>
