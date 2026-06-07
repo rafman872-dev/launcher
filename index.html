@@ -110,6 +110,8 @@
         let currentIndex = 0;
         let currentFilter = 'all';
         let selectedCardIndex = 0;
+        let focusArea = 'cards'; // 'search' | 'filters' | 'cards'
+        let filterFocusIndex = 0;
         let gamepadConnected = false;
         let gamepadLastTime = 0;
         const CHUNK_SIZE = 60;
@@ -152,6 +154,8 @@
 
             currentIndex = 0;
             selectedCardIndex = 0;
+            focusArea = 'cards';
+            filterFocusIndex = 0;
             renderNextChunk(true);
         }
 
@@ -198,9 +202,8 @@
         }
 
         // ===== ГЕЙМПАД =====
-        // Улучшенная навигация: определяем число колонок динамически,
-        // делаем edge-trigger для стиков и debounce для кнопок —
-        // лев/прав теперь перемещают по плиткам, а не меняют фильтр.
+        // Навигация: фокусная модель (search → filters → cards), видимые колонки,
+        // edge-trigger для стиков и debounce для кнопок. Поиск/фильтры доступны.
         let lastButtonTimestamps = {};
         const BUTTON_REPEAT_DELAY = 140; // ms
         let axisXActive = false, axisYActive = false;
@@ -263,19 +266,124 @@
             }
         }
 
+        // Фокусная модель: 'search' | 'filters' | 'cards'
+        function updateCardHighlight() {
+            const cards = document.querySelectorAll('.card');
+            cards.forEach(card => card.style.boxShadow = 'none');
+
+            const searchInput = document.getElementById('searchInput');
+            const filterBtns = document.querySelectorAll('.filter-btn');
+
+            // Сброс header-стилей
+            if (searchInput) searchInput.style.boxShadow = '';
+            filterBtns.forEach(b => b.style.boxShadow = '');
+
+            if (focusArea === 'search') {
+                if (searchInput) {
+                    searchInput.style.boxShadow = '0 0 30px rgba(0,255,136,0.8)';
+                    searchInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                return;
+            }
+
+            if (focusArea === 'filters') {
+                const idx = Math.max(0, Math.min(filterFocusIndex, filterBtns.length - 1));
+                if (filterBtns[idx]) {
+                    filterBtns[idx].style.boxShadow = '0 0 30px rgba(0,255,136,0.8)';
+                    // прокрутить верхнюю часть, чтобы показать фильтры/поиск
+                    const topElem = document.querySelector('.search-container') || document.querySelector('.filter-bar');
+                    if (topElem) topElem.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    filterBtns[idx].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+                return;
+            }
+
+            // focusArea === 'cards'
+            const card = cards[selectedCardIndex];
+            if (card) {
+                card.style.boxShadow = '0 0 30px rgba(0,255,136,0.8)';
+                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } else {
+                const topElem = document.querySelector('.search-container');
+                if (topElem) topElem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function moveSelectionHorizontal(steps) {
+            if (focusArea === 'filters') {
+                const filterBtns = document.querySelectorAll('.filter-btn');
+                filterFocusIndex = (filterFocusIndex + steps + filterBtns.length) % filterBtns.length;
+                updateCardHighlight();
+            } else {
+                moveSelection(steps);
+            }
+        }
+
+        function moveSelectionVertical(rows) {
+            const cols = getVisibleColumns();
+
+            if (focusArea === 'search') {
+                if (rows > 0) {
+                    focusArea = 'filters';
+                    filterFocusIndex = 0;
+                    updateCardHighlight();
+                }
+                return;
+            }
+
+            if (focusArea === 'filters') {
+                if (rows > 0) {
+                    focusArea = 'cards';
+                    // попытаемся поставить курсор в соответствующую колонку
+                    const col = Math.min(getVisibleColumns(), Math.max(1, getVisibleColumns()));
+                    selectedCardIndex = Math.min(filteredGames.length - 1, filterFocusIndex);
+                    ensureRenderedForIndex(selectedCardIndex);
+                    updateCardHighlight();
+                } else if (rows < 0) {
+                    focusArea = 'search';
+                    updateCardHighlight();
+                }
+                return;
+            }
+
+            // focusArea === 'cards'
+            const currentCols = Math.max(1, cols);
+            const currentRow = Math.floor(selectedCardIndex / currentCols);
+            if (rows < 0 && currentRow === 0) {
+                // подняться на фильтры
+                focusArea = 'filters';
+                filterFocusIndex = Math.min(document.querySelectorAll('.filter-btn').length - 1, selectedCardIndex % currentCols);
+                updateCardHighlight();
+                return;
+            }
+
+            moveSelection(rows * currentCols);
+        }
+
         function moveSelection(offset) {
             selectedCardIndex = Math.max(0, Math.min(selectedCardIndex + offset, filteredGames.length - 1));
             ensureRenderedForIndex(selectedCardIndex);
             updateCardHighlight();
         }
 
-        function moveSelectionHorizontal(steps) {
-            moveSelection(steps);
-        }
-
-        function moveSelectionVertical(rows) {
-            const cols = getVisibleColumns();
-            moveSelection(rows * cols);
+        function clickSelectedCard() {
+            if (focusArea === 'search') {
+                const search = document.getElementById('searchInput');
+                if (search) search.focus();
+                return;
+            }
+            if (focusArea === 'filters') {
+                const btns = document.querySelectorAll('.filter-btn');
+                const btn = btns[filterFocusIndex];
+                if (btn) btn.click();
+                return;
+            }
+            const cards = document.querySelectorAll('.card');
+            const card = cards[selectedCardIndex];
+            if (card) {
+                const btn = card.querySelector('.btn');
+                if (btn) btn.click();
+            }
         }
 
         function pollGamepad() {
@@ -294,7 +402,7 @@
                 if (!gp) continue;
                 anyConnected = true;
 
-                // D-Pad (кнопки 12-15) с задержкой повторения
+                // D-Pad (12-15)
                 if (gp.buttons[12].pressed && (!lastButtonTimestamps[12] || now - lastButtonTimestamps[12] > BUTTON_REPEAT_DELAY)) {
                     moveSelectionVertical(-1); // ↑
                     lastButtonTimestamps[12] = now;
@@ -312,7 +420,7 @@
                     lastButtonTimestamps[15] = now;
                 }
 
-                // Left Stick (оси 0, 1) — edge-trigger (одно движение при наклоне)
+                // Left Stick axes - edge trigger
                 const axisX = gp.axes[0];
                 const axisY = gp.axes[1];
 
@@ -336,21 +444,32 @@
                     axisXActive = false;
                 }
 
-                // Кнопки действий (с debounce)
+                // actions (A/Y)
                 if (gp.buttons[0].pressed && (!lastButtonTimestamps[0] || now - lastButtonTimestamps[0] > BUTTON_REPEAT_DELAY)) {
-                    clickSelectedCard();    // A
+                    clickSelectedCard(); // A
                     lastButtonTimestamps[0] = now;
                 }
                 if (gp.buttons[3].pressed && (!lastButtonTimestamps[3] || now - lastButtonTimestamps[3] > BUTTON_REPEAT_DELAY)) {
-                    clickSelectedCard();    // Y
+                    clickSelectedCard(); // Y
                     lastButtonTimestamps[3] = now;
                 }
+
+                // LB/RB quick filter cycling
+                if (gp.buttons[4].pressed && (!lastButtonTimestamps[4] || now - lastButtonTimestamps[4] > BUTTON_REPEAT_DELAY)) {
+                    changeFilter(-1); // LB
+                    lastButtonTimestamps[4] = now;
+                }
+                if (gp.buttons[5].pressed && (!lastButtonTimestamps[5] || now - lastButtonTimestamps[5] > BUTTON_REPEAT_DELAY)) {
+                    changeFilter(1); // RB
+                    lastButtonTimestamps[5] = now;
+                }
+
                 if (gp.buttons[6].pressed && (!lastButtonTimestamps[6] || now - lastButtonTimestamps[6] > BUTTON_REPEAT_DELAY)) {
-                    scrollUp();             // LT
+                    scrollUp(); // LT
                     lastButtonTimestamps[6] = now;
                 }
                 if (gp.buttons[7].pressed && (!lastButtonTimestamps[7] || now - lastButtonTimestamps[7] > BUTTON_REPEAT_DELAY)) {
-                    scrollDown();           // RT
+                    scrollDown(); // RT
                     lastButtonTimestamps[7] = now;
                 }
 
@@ -359,26 +478,6 @@
 
             if (gamepadConnected || anyConnected) {
                 requestAnimationFrame(pollGamepad);
-            }
-        }
-
-        function updateCardHighlight() {
-            const cards = document.querySelectorAll('.card');
-            cards.forEach(card => card.style.boxShadow = 'none');
-
-            const card = cards[selectedCardIndex];
-            if (card) {
-                card.style.boxShadow = '0 0 30px rgba(0,255,136,0.8)';
-                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            }
-        }
-
-        function clickSelectedCard() {
-            const cards = document.querySelectorAll('.card');
-            const card = cards[selectedCardIndex];
-            if (card) {
-                const btn = card.querySelector('.btn');
-                if (btn) btn.click();
             }
         }
 
@@ -391,11 +490,11 @@
         }
 
         function scrollUp() {
-            document.querySelector('.grid').scrollBy({ top: -300, behavior: 'smooth' });
+            window.scrollBy({ top: -300, behavior: 'smooth' });
         }
 
         function scrollDown() {
-            document.querySelector('.grid').scrollBy({ top: 300, behavior: 'smooth' });
+            window.scrollBy({ top: 300, behavior: 'smooth' });
         }
     </script>
 </body>
